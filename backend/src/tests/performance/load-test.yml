@@ -1,0 +1,75 @@
+# Artillery.js Load Testing Configuration
+config:
+  target: 'http://localhost:5000'
+  phases:
+    - duration: 60
+      arrivalRate: 10
+      name: "Warm up"
+    - duration: 120
+      arrivalRate: 50
+      name: "Ramp up load"
+    - duration: 300
+      arrivalRate: 100
+      name: "Sustained load"
+  processor: "./load-test-processor.js"
+  variables:
+    testUsers:
+      - email: "loadtest1@example.com"
+        password: "password123"
+      - email: "loadtest2@example.com"
+        password: "password123"
+      - email: "loadtest3@example.com"
+        password: "password123"
+
+scenarios:
+  - name: "Authentication Load Test"
+    weight: 30
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ $randomPick(testUsers).email }}"
+            password: "{{ $randomPick(testUsers).password }}"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+      - think: 1
+
+  - name: "Message Sending Load Test"
+    weight: 50
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "loadtest1@example.com"
+            password: "password123"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+            - json: "$.user.id"
+              as: "userId"
+      - post:
+          url: "/api/messages"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          json:
+            recipientId: 2
+            content: "Load test message {{ $randomString() }}"
+      - think: 2
+
+  - name: "Contact Retrieval Load Test"
+    weight: 20
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "loadtest2@example.com"
+            password: "password123"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+      - get:
+          url: "/api/contacts"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+      - think: 1

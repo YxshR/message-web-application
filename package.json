@@ -1,0 +1,51 @@
+{
+  "name": "realtime-messaging-app",
+  "version": "1.0.0",
+  "description": "A full-stack real-time messaging application built with React, Node.js, Express, and PostgreSQL",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm start",
+    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd frontend && npm run build && serve -s frontend/build",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "build:production": "NODE_ENV=production npm run build",
+    "deploy:setup": "npm run install:all && npm run build:production",
+    "deploy:migrate": "cd backend && npm run migrate",
+    "deploy:seed": "cd backend && npm run seed",
+    "deploy:full": "npm run deploy:setup && npm run deploy:migrate && npm run deploy:seed",
+    "deploy:production": "bash scripts/deploy.sh production",
+    "deploy:staging": "bash scripts/deploy.sh staging",
+    "deploy:development": "bash scripts/deploy.sh development",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "test": "node scripts/run-all-tests.js",
+    "test:all": "node scripts/run-all-tests.js --performance --e2e",
+    "test:backend": "cd backend && npm test",
+    "test:frontend": "cd frontend && npm test -- --watchAll=false",
+    "test:coverage": "concurrently \"npm run test:backend:coverage\" \"npm run test:frontend:coverage\"",
+    "test:backend:coverage": "cd backend && npm run test:coverage",
+    "test:frontend:coverage": "cd frontend && npm run test:coverage",
+    "test:integration": "cd backend && npm run test:integration",
+    "test:performance": "cd backend && npm run test:performance",
+    "test:e2e": "cd frontend && npm run test:e2e"
+  },
+  "keywords": [
+    "react",
+    "nodejs",
+    "express",
+    "postgresql",
+    "socket.io",
+    "messaging",
+    "real-time"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "serve": "^14.2.3"
+  }
+}
