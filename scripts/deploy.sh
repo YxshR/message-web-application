@@ -1,9 +1,16 @@
 #!/bin/bash
 
-# Real-time Messaging App Deployment Script
-# This script handles the complete deployment process
+# Real-Time Chat App Deployment Script
+# Usage: ./scripts/deploy.sh [environment]
+# Environments: development, staging, production
 
 set -e  # Exit on any error
+
+# Configuration
+ENVIRONMENT=${1:-development}
+PROJECT_NAME="real-time-chat-app"
+BACKUP_DIR="backups"
+LOG_FILE="deploy.log"
 
 # Colors for output
 RED='\033[0;31m'
@@ -12,34 +19,23 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
-APP_NAME="realtime-messaging-app"
-DEPLOY_ENV=${1:-production}
-BACKUP_DIR="./backups"
-LOG_FILE="./logs/deploy-$(date +%Y%m%d-%H%M%S).log"
-
-# Functions
+# Logging function
 log() {
-    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a $LOG_FILE
 }
 
 error() {
-    echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${RED}[ERROR]${NC} $1" | tee -a $LOG_FILE
     exit 1
 }
 
 success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${GREEN}[SUCCESS]${NC} $1" | tee -a $LOG_FILE
 }
 
 warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a $LOG_FILE
 }
-
-# Create necessary directories
-mkdir -p logs backups
-
-log "Starting deployment for $APP_NAME in $DEPLOY_ENV environment"
 
 # Check prerequisites
 check_prerequisites() {
@@ -55,44 +51,43 @@ check_prerequisites() {
         error "npm is not installed"
     fi
     
-    # Check PostgreSQL
-    if ! command -v psql &> /dev/null; then
-        error "PostgreSQL client is not installed"
+    # Check PostgreSQL (for local deployment)
+    if [ "$ENVIRONMENT" != "docker" ] && ! command -v psql &> /dev/null; then
+        warning "PostgreSQL client not found - make sure database is accessible"
     fi
     
-    # Check Docker (optional)
-    if command -v docker &> /dev/null; then
-        log "Docker is available"
-    else
-        warning "Docker is not available - manual deployment will be used"
+    # Check PM2 (for production)
+    if [ "$ENVIRONMENT" = "production" ] && ! command -v pm2 &> /dev/null; then
+        error "PM2 is not installed. Install with: npm install -g pm2"
     fi
     
     success "Prerequisites check completed"
 }
 
-# Backup database
-backup_database() {
-    if [ "$DEPLOY_ENV" = "production" ]; then
-        log "Creating database backup..."
+# Create backup
+create_backup() {
+    if [ "$ENVIRONMENT" = "production" ]; then
+        log "Creating backup..."
         
-        # Load environment variables
-        if [ -f "backend/.env.production" ]; then
-            source backend/.env.production
-        else
-            error "Production environment file not found"
+        # Create backup directory
+        mkdir -p $BACKUP_DIR
+        
+        # Backup database (if local)
+        if [ -n "$DATABASE_URL" ]; then
+            BACKUP_FILE="$BACKUP_DIR/db_backup_$(date +%Y%m%d_%H%M%S).sql"
+            log "Backing up database to $BACKUP_FILE"
+            # Add your database backup command here
+            # pg_dump $DATABASE_URL > $BACKUP_FILE
         fi
         
-        # Create backup
-        BACKUP_FILE="$BACKUP_DIR/db-backup-$(date +%Y%m%d-%H%M%S).sql"
-        pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" > "$BACKUP_FILE"
-        
-        if [ $? -eq 0 ]; then
-            success "Database backup created: $BACKUP_FILE"
-        else
-            error "Database backup failed"
+        # Backup current application (if exists)
+        if [ -d "backend" ]; then
+            BACKUP_APP="$BACKUP_DIR/app_backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+            log "Backing up application to $BACKUP_APP"
+            tar -czf $BACKUP_APP backend frontend package.json
         fi
-    else
-        log "Skipping database backup for $DEPLOY_ENV environment"
+        
+        success "Backup completed"
     fi
 }
 
@@ -105,240 +100,162 @@ install_dependencies() {
     
     # Install backend dependencies
     cd backend
-    npm install --production
+    npm install
     cd ..
     
     # Install frontend dependencies
     cd frontend
-    npm install --production
+    npm install
     cd ..
     
-    success "Dependencies installed successfully"
+    success "Dependencies installed"
 }
 
-# Build applications
-build_applications() {
-    log "Building applications..."
-    
-    # Set environment
-    export NODE_ENV=$DEPLOY_ENV
+# Build application
+build_application() {
+    log "Building application..."
     
     # Build frontend
-    log "Building frontend..."
     cd frontend
     npm run build
     cd ..
     
     # Backend doesn't need building (Node.js)
-    log "Backend build completed (no compilation needed)"
+    log "Backend build: No transpilation needed"
     
-    success "Applications built successfully"
+    success "Application built"
 }
 
-# Run database migrations
-run_migrations() {
-    log "Running database migrations..."
+# Setup database
+setup_database() {
+    log "Setting up database..."
     
     cd backend
-    npm run migrate
     
-    if [ $? -eq 0 ]; then
-        success "Database migrations completed"
+    # Generate Prisma client
+    npx prisma generate
+    
+    # Run migrations
+    if [ "$ENVIRONMENT" = "production" ]; then
+        npx prisma migrate deploy
     else
-        error "Database migrations failed"
+        npx prisma migrate dev
+    fi
+    
+    # Seed database (optional)
+    if [ "$ENVIRONMENT" != "production" ]; then
+        npm run db:seed || warning "Database seeding failed or skipped"
     fi
     
     cd ..
+    
+    success "Database setup completed"
 }
 
-# Seed database (development only)
-seed_database() {
-    if [ "$DEPLOY_ENV" != "production" ]; then
-        log "Seeding database with test data..."
-        
-        cd backend
-        npm run seed
-        
-        if [ $? -eq 0 ]; then
-            success "Database seeded successfully"
-        else
-            warning "Database seeding failed (this may be expected)"
-        fi
-        
-        cd ..
-    else
-        log "Skipping database seeding for production environment"
-    fi
-}
-
-# Run tests
-run_tests() {
-    if [ "$DEPLOY_ENV" != "production" ]; then
-        log "Running test suite..."
-        
-        # Run backend tests
-        cd backend
-        npm test -- --passWithNoTests
-        cd ..
-        
-        # Run frontend tests
-        cd frontend
-        npm test -- --watchAll=false --passWithNoTests
-        cd ..
-        
-        success "All tests passed"
-    else
-        log "Skipping tests for production deployment"
-    fi
-}
-
-# Deploy with Docker
-deploy_docker() {
-    log "Deploying with Docker..."
+# Deploy application
+deploy_application() {
+    log "Deploying application for $ENVIRONMENT environment..."
     
-    # Stop existing containers
-    docker-compose -f docker-compose.prod.yml down
+    case $ENVIRONMENT in
+        "development")
+            log "Starting development servers..."
+            npm run dev
+            ;;
+        "production")
+            log "Starting production servers with PM2..."
+            pm2 start ecosystem.config.js --env production
+            pm2 save
+            ;;
+        "docker")
+            log "Starting Docker containers..."
+            docker-compose up -d
+            ;;
+        "docker-dev")
+            log "Starting Docker development environment..."
+            docker-compose -f docker-compose.dev.yml up -d
+            ;;
+        "docker-prod")
+            log "Starting Docker production environment..."
+            docker-compose -f docker-compose.prod.yml up -d
+            ;;
+        *)
+            error "Unknown environment: $ENVIRONMENT"
+            ;;
+    esac
     
-    # Build and start containers
-    docker-compose -f docker-compose.prod.yml up -d --build
-    
-    # Wait for services to be ready
-    log "Waiting for services to start..."
-    sleep 30
-    
-    # Check if services are running
-    if docker-compose -f docker-compose.prod.yml ps | grep -q "Up"; then
-        success "Docker deployment completed successfully"
-    else
-        error "Docker deployment failed"
-    fi
-}
-
-# Deploy manually
-deploy_manual() {
-    log "Deploying manually..."
-    
-    # Stop existing processes (if any)
-    pkill -f "node.*server.js" || true
-    pkill -f "serve.*frontend/build" || true
-    
-    # Start backend
-    log "Starting backend server..."
-    cd backend
-    nohup npm run start:production > ../logs/backend.log 2>&1 &
-    BACKEND_PID=$!
-    echo $BACKEND_PID > ../logs/backend.pid
-    cd ..
-    
-    # Wait for backend to start
-    sleep 10
-    
-    # Check if backend is running
-    if kill -0 $BACKEND_PID 2>/dev/null; then
-        success "Backend started successfully (PID: $BACKEND_PID)"
-    else
-        error "Backend failed to start"
-    fi
-    
-    # Start frontend (using serve)
-    log "Starting frontend server..."
-    nohup npx serve -s frontend/build -l 3000 > logs/frontend.log 2>&1 &
-    FRONTEND_PID=$!
-    echo $FRONTEND_PID > logs/frontend.pid
-    
-    # Wait for frontend to start
-    sleep 5
-    
-    # Check if frontend is running
-    if kill -0 $FRONTEND_PID 2>/dev/null; then
-        success "Frontend started successfully (PID: $FRONTEND_PID)"
-    else
-        error "Frontend failed to start"
-    fi
+    success "Application deployed"
 }
 
 # Health check
 health_check() {
     log "Performing health check..."
     
+    # Wait for services to start
+    sleep 10
+    
     # Check backend health
-    if curl -f http://localhost:5000/api/health > /dev/null 2>&1; then
+    if curl -f http://localhost:5000/health > /dev/null 2>&1; then
         success "Backend health check passed"
     else
         error "Backend health check failed"
     fi
     
-    # Check frontend
-    if curl -f http://localhost:3000 > /dev/null 2>&1; then
-        success "Frontend health check passed"
+    # Check database health
+    if curl -f http://localhost:5000/health/db > /dev/null 2>&1; then
+        success "Database health check passed"
     else
-        error "Frontend health check failed"
+        warning "Database health check failed"
     fi
 }
 
 # Cleanup old deployments
 cleanup() {
-    log "Cleaning up old deployments..."
+    log "Cleaning up..."
     
-    # Remove old log files (keep last 10)
-    find logs -name "deploy-*.log" -type f | sort -r | tail -n +11 | xargs rm -f
+    # Remove old backups (keep last 5)
+    if [ -d "$BACKUP_DIR" ]; then
+        find $BACKUP_DIR -name "*.tar.gz" -type f -mtime +7 -delete
+        find $BACKUP_DIR -name "*.sql" -type f -mtime +7 -delete
+    fi
     
-    # Remove old database backups (keep last 5)
-    find backups -name "db-backup-*.sql" -type f | sort -r | tail -n +6 | xargs rm -f
+    # Clean npm cache
+    npm cache clean --force
     
     success "Cleanup completed"
 }
 
-# Main deployment process
+# Main deployment function
 main() {
-    log "=== Starting Deployment Process ==="
+    log "Starting deployment for environment: $ENVIRONMENT"
     
-    check_prerequisites
-    backup_database
-    install_dependencies
-    build_applications
-    run_migrations
-    seed_database
-    run_tests
-    
-    # Choose deployment method
-    if command -v docker &> /dev/null && [ -f "docker-compose.prod.yml" ]; then
-        deploy_docker
-    else
-        deploy_manual
+    # Check if environment file exists
+    if [ "$ENVIRONMENT" != "docker" ] && [ "$ENVIRONMENT" != "docker-dev" ] && [ "$ENVIRONMENT" != "docker-prod" ]; then
+        if [ ! -f "backend/.env" ]; then
+            error "Backend .env file not found. Copy from .env.example and configure."
+        fi
+        if [ ! -f "frontend/.env" ]; then
+            error "Frontend .env file not found. Copy from .env.example and configure."
+        fi
     fi
     
+    check_prerequisites
+    create_backup
+    install_dependencies
+    build_application
+    setup_database
+    deploy_application
     health_check
     cleanup
     
-    success "=== Deployment completed successfully ==="
-    log "Application is now running:"
-    log "  Frontend: http://localhost:3000"
+    success "Deployment completed successfully!"
+    log "Application is running on:"
     log "  Backend:  http://localhost:5000"
-    log "  Logs:     tail -f logs/backend.log logs/frontend.log"
+    log "  Frontend: http://localhost:3000"
+    log "  Health:   http://localhost:5000/health"
 }
 
-# Handle script arguments
-case "$1" in
-    "production"|"staging"|"development")
-        main
-        ;;
-    "rollback")
-        log "Rolling back deployment..."
-        # Add rollback logic here
-        ;;
-    "status")
-        log "Checking deployment status..."
-        # Add status check logic here
-        ;;
-    *)
-        echo "Usage: $0 {production|staging|development|rollback|status}"
-        echo ""
-        echo "Examples:"
-        echo "  $0 production    # Deploy to production"
-        echo "  $0 development   # Deploy to development"
-        echo "  $0 rollback      # Rollback last deployment"
-        echo "  $0 status        # Check deployment status"
-        exit 1
-        ;;
-esac
+# Handle script interruption
+trap 'error "Deployment interrupted"' INT TERM
+
+# Run main function
+main

@@ -1,0 +1,41 @@
+# Dependencies
+node_modules
+npm-debug.log*
+
+# Environment files
+.env.example
+.env.development
+.env.test
+
+# Build output (will be created during build)
+dist
+
+# Testing
+tests/
+*.test.js
+*.test.jsx
+*.spec.js
+*.spec.jsx
+coverage/
+
+# Development files
+vite.config.js.timestamp-*
+
+# Documentation
+README.md
+*.md
+
+# Git
+.git
+.gitignore
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

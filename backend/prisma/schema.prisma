@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String                    @id @default(cuid())
+  username             String                    @unique
+  email                String                    @unique
+  passwordHash         String
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  contactOf            Contact[]                 @relation("ContactUser")
+  contacts             Contact[]                 @relation("UserContacts")
+  conversations        ConversationParticipant[]
+  sentMessages         Message[]                 @relation("MessageSender")
+  sentFriendRequests   FriendRequest[]           @relation("FriendRequestSender")
+  receivedFriendRequests FriendRequest[]         @relation("FriendRequestReceiver")
+
+  @@map("users")
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  userId    String
+  contactId String
+  createdAt DateTime @default(now())
+  contact   User     @relation("ContactUser", fields: [contactId], references: [id], onDelete: Cascade)
+  user      User     @relation("UserContacts", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contactId])
+  @@map("contacts")
+}
+
+model FriendRequest {
+  id         String              @id @default(cuid())
+  senderId   String
+  receiverId String
+  status     FriendRequestStatus @default(PENDING)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  sender     User                @relation("FriendRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User                @relation("FriendRequestReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@map("friend_requests")
+}
+
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model Conversation {
+  id           String                    @id @default(cuid())
+  name         String?
+  isGroup      Boolean                   @default(false)
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  userId         String
+  joinedAt       DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  content        String
+  senderId       String
+  conversationId String
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
